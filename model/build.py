@@ -165,6 +165,27 @@ class LPNC(nn.Module):
         self.W = nn.Parameter(torch.eye(512))
         self.prompt_learner = PromptLearner(num_classes, dataset_name, self.base_model.dtype,
                                             self.base_model.token_embedding)
+
+        # CGI Local: learnable queries + cross-attention on patch tokens for S*_local
+        self.cgi_num_queries = 2
+        self.cgi_queries = nn.Parameter(torch.randn(self.cgi_num_queries, self.embed_dim) * 0.02)
+        self.cgi_ln_q = LayerNorm(self.embed_dim)
+        self.cgi_ln_kv = LayerNorm(self.embed_dim)
+        self.cgi_local_cross_attn = nn.MultiheadAttention(
+            self.embed_dim, self.embed_dim // 64, batch_first=True
+        )
+        self.cgi_ffn = nn.Sequential(
+            nn.Linear(self.embed_dim, self.embed_dim * 4),
+            nn.GELU(),
+            nn.Linear(self.embed_dim * 4, self.embed_dim)
+        )
+        self.cgi_local_map = nn.Sequential(
+            nn.Linear(self.embed_dim, self.embed_dim),
+            nn.ReLU(),
+            nn.Linear(self.embed_dim, self.embed_dim),
+            nn.ReLU(),
+            nn.Linear(self.embed_dim, self.embed_dim)
+        )
           
     def cross_former(self, q, k, v):
         x = self.cross_attn(
@@ -231,9 +252,23 @@ class LPNC(nn.Module):
         t_tse_f = self.texual_emb_layer(text_feats, caption_ids, atten_t)
 
         if 'supid' in self.current_task:
-            token_features = self.img2text(i_feats.half())
+            token_features = self.img2text(i_feats.half())  # S*_global: [B, 512]
             with autocast():
-                prompts = self.prompt_learner(token_features + t_feats @ self.W)
+                # CGI Local: compute S*_local from image patch tokens
+                patch_tokens = image_feats[:, 1:, :]  # [B, M, 512]
+                B_size = patch_tokens.shape[0]
+                queries = self.cgi_queries.unsqueeze(0).expand(B_size, -1, -1)  # [B, K, 512]
+                q_ln = self.cgi_ln_q(queries)
+                kv_ln = self.cgi_ln_kv(patch_tokens)
+                attn_out, _ = self.cgi_local_cross_attn(q_ln, kv_ln, kv_ln)  # [B, K, 512]
+                attn_out = queries + attn_out  # residual connection
+                P = attn_out + self.cgi_ffn(attn_out)  # FFN with residual: [B, K, 512]
+                s_local = self.cgi_local_map(P.mean(dim=1))  # Avg pool + MLP: [B, 512]
+
+                # Combine S*_global + S*_local
+                s_star = token_features + s_local
+
+                prompts = self.prompt_learner(s_star)
                 text_feature = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
 
                 cross_x = self.cross_former(text_feature.unsqueeze(1), image_feats, image_feats)
