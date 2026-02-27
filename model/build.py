@@ -343,9 +343,8 @@ class PromptLearner(nn.Module):
         # use given words to initialize context vectors
         ctx_init = ctx_init.replace("_", " ")
         n_ctx = 4
-        tokenized_prompts = tokenize(ctx_init).cuda()
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        tokenized_prompts = tokenized_prompts.to(device)
+        tokenized_prompts = tokenize(ctx_init).to(device)
         token_embedding = token_embedding.to(device)
         with torch.no_grad():
             embedding = token_embedding(tokenized_prompts).type(dtype)
