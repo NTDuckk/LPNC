@@ -8,7 +8,8 @@ def get_args():
     parser.add_argument("--lambda2_weight", default=3.5, type=float)
 
     ######################## general settings ########################
-    parser.add_argument("--local_rank", default=0, type=int)
+    parser.add_argument("--local_rank", default=0, type=int, help="local rank for distributed training")
+    parser.add_argument("--num_gpus", default=1, type=int, help="number of gpus for distributed training")
     parser.add_argument("--name", default="baseline", help="experiment name to save")
     parser.add_argument("--output_dir", default="run_logs")
     parser.add_argument("--log_period", default=20)
