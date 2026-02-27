@@ -69,7 +69,7 @@ def get_args():
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default="CUHK-PEDES", help="[CUHK-PEDES, ICFG-PEDES, RSTPReid]")
     parser.add_argument("--sampler", default="identity", help="choose sampler from [identity, random]")
-    parser.add_argument("--num_instance", type=int, default=2)
+    parser.add_argument("--num_instance", type=int, default=4)
     parser.add_argument("--root_dir", default="datasets/dataset")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--test_batch_size", type=int, default=64)
