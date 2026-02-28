@@ -1,4 +1,3 @@
-from turtle import pd
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -11,7 +10,7 @@ def normalize(x, axis=-1):
     Returns:
       x: pytorch Variable, same shape as input
     """
-    x = 1. * x / (torch.norm(x, 2, axis, keepdim=True).expand_as(x) + 1e-12)
+    x = 1.0 * x / (torch.norm(x, 2, axis, keepdim=True).expand_as(x) + 1e-12)
     return x
 
 
@@ -25,6 +24,7 @@ def tensor_euclidean_dist(x, y):
     xx = torch.pow(x, 2).sum(1, keepdim=True).expand(m, n)
     yy = torch.pow(y, 2).sum(1, keepdim=True).expand(n, m).t()
     dist = xx + yy
+    # legacy signature but still works
     dist.addmm_(1, -2, x, y.t())
     dist = dist.clamp(min=1e-12).sqrt()  # for numerical stability
     return dist
@@ -43,7 +43,6 @@ def euclidean_dist(x, y):
     yy = torch.pow(y, 2).sum(1, keepdim=True).expand(n, m).t()
     dist = xx + yy
     dist = dist - 2 * torch.matmul(x, y.t())
-    # dist.addmm_(1, -2, x, y.t())
     dist = dist.clamp(min=1e-12).sqrt()  # for numerical stability
     return dist
 
@@ -61,62 +60,64 @@ def cosine_dist(x, y):
     y_norm = torch.pow(y, 2).sum(1, keepdim=True).sqrt().expand(n, m).t()
     xy_intersection = torch.mm(x, y.t())
     dist = xy_intersection / (x_norm * y_norm)
-    dist = (1. - dist) / 2
+    dist = (1.0 - dist) / 2
     return dist
 
 
 def hard_example_mining(dist_mat, labels, return_inds=False):
-    """For each anchor, find the hardest positive and negative sample.
-    Args:
-      dist_mat: pytorch Variable, pair wise distance between samples, shape [N, N]
-      labels: pytorch LongTensor, with shape [N]
-      return_inds: whether to return the indices. Save time if `False`(?)
-    Returns:
-      dist_ap: pytorch Variable, distance(anchor, positive); shape [N]
-      dist_an: pytorch Variable, distance(anchor, negative); shape [N]
-      p_inds: pytorch LongTensor, with shape [N];
-        indices of selected hard positive samples; 0 <= p_inds[i] <= N - 1
-      n_inds: pytorch LongTensor, with shape [N];
-        indices of selected hard negative samples; 0 <= n_inds[i] <= N - 1
-    NOTE: Only consider the case in which all labels have same num of samples,
-      thus we can cope with all anchors in parallel.
     """
-    assert len(dist_mat.size()) == 2
+    For each anchor, find the hardest positive and negative sample.
+
+    Robust version:
+    - Works even when each label appears different times in the batch.
+    - Avoids `view(N, -1)` on masked tensors (which crashes when #pos varies).
+    """
+    assert dist_mat.dim() == 2
     assert dist_mat.size(0) == dist_mat.size(1)
-    N, M = dist_mat.size(0), dist_mat.size(1)
+    N = dist_mat.size(0)
 
-    # shape [N, N]
-    is_pos = labels.expand(N, N).eq(labels.expand(N, N).t())
-    is_neg = labels.expand(N, N).ne(labels.expand(N, N).t())
+    if labels.dim() == 1:
+        labels_ = labels.view(N, 1)
+    else:
+        labels_ = labels
+        if labels_.numel() != N:
+            labels_ = labels.view(N, 1)
 
-    # `dist_ap` means distance(anchor, positive)
-    # both `dist_ap` and `relative_p_inds` with shape [N, 1]
+    # [N, N]
+    is_pos = labels_.eq(labels_.t())
+    is_neg = ~is_pos
 
-    dist_ap, relative_p_inds = torch.max(
-        dist_mat[is_pos].contiguous().view(N, -1), 1, keepdim=True)
+    # Exclude self from positives
+    diag = torch.eye(N, dtype=torch.bool, device=dist_mat.device)
+    is_pos = is_pos & (~diag)
 
-    # `dist_an` means distance(anchor, negative)
-    # both `dist_an` and `relative_n_inds` with shape [N, 1]
+    # Hardest positive: max distance among positives
+    dist_pos = dist_mat.clone()
+    dist_pos[~is_pos] = -1e9
+    dist_ap, p_inds = dist_pos.max(dim=1)  # [N], [N]
 
-    dist_an, relative_n_inds = torch.min(
-        dist_mat[is_neg].contiguous().view(N, -1), 1, keepdim=True)
-    # shape [N]
-    dist_ap = dist_ap.squeeze(1)
-    dist_an = dist_an.squeeze(1)
+    # If an anchor has no positive (ID appears once), dist_ap will be -1e9
+    no_pos = dist_ap.le(-1e8)
+    if no_pos.any():
+        dist_ap = dist_ap.clone()
+        p_inds = p_inds.clone()
+        dist_ap[no_pos] = 0.0
+        # set to itself for safety
+        p_inds[no_pos] = torch.arange(N, device=dist_mat.device, dtype=torch.long)[no_pos]
+
+    # Hardest negative: min distance among negatives
+    dist_neg = dist_mat.clone()
+    dist_neg[~is_neg] = 1e9
+    dist_an, n_inds = dist_neg.min(dim=1)  # [N], [N]
+
+    no_neg = dist_an.ge(1e8)
+    if no_neg.any():
+        dist_an = dist_an.clone()
+        n_inds = n_inds.clone()
+        dist_an[no_neg] = 0.0
+        n_inds[no_neg] = torch.arange(N, device=dist_mat.device, dtype=torch.long)[no_neg]
 
     if return_inds:
-        # shape [N, N]
-        ind = (labels.new().resize_as_(labels)
-               .copy_(torch.arange(0, N).long())
-               .unsqueeze(0).expand(N, N))
-        # shape [N, 1]
-        p_inds = torch.gather(
-            ind[is_pos].contiguous().view(N, -1), 1, relative_p_inds.data)
-        n_inds = torch.gather(
-            ind[is_neg].contiguous().view(N, -1), 1, relative_n_inds.data)
-        # shape [N]
-        p_inds = p_inds.squeeze(1)
-        n_inds = n_inds.squeeze(1)
         return dist_ap, dist_an, p_inds, n_inds
 
     return dist_ap, dist_an
@@ -174,18 +175,28 @@ class RankingLoss:
     def _batch_hard(self, mat_distance, mat_similarity, more_similar):
 
         if more_similar == 'smaller':
-            sorted_mat_distance, _ = torch.sort(mat_distance + (-9999999.) * (1 - mat_similarity), dim=1,
-                                                descending=True)
+            sorted_mat_distance, _ = torch.sort(
+                mat_distance + (-9999999.0) * (1 - mat_similarity),
+                dim=1, descending=True
+            )
             hard_p = sorted_mat_distance[:, 0]
-            sorted_mat_distance, _ = torch.sort(mat_distance + (9999999.) * (mat_similarity), dim=1, descending=False)
+            sorted_mat_distance, _ = torch.sort(
+                mat_distance + (9999999.0) * (mat_similarity),
+                dim=1, descending=False
+            )
             hard_n = sorted_mat_distance[:, 0]
             return hard_p, hard_n
 
         elif more_similar == 'larger':
-            sorted_mat_distance, _ = torch.sort(mat_distance + (9999999.) * (1 - mat_similarity), dim=1,
-                                                descending=False)
+            sorted_mat_distance, _ = torch.sort(
+                mat_distance + (9999999.0) * (1 - mat_similarity),
+                dim=1, descending=False
+            )
             hard_p = sorted_mat_distance[:, 0]
-            sorted_mat_distance, _ = torch.sort(mat_distance + (-9999999.) * (mat_similarity), dim=1, descending=True)
+            sorted_mat_distance, _ = torch.sort(
+                mat_distance + (-9999999.0) * (mat_similarity),
+                dim=1, descending=True
+            )
             hard_n = sorted_mat_distance[:, 0]
             return hard_p, hard_n
 
@@ -209,7 +220,6 @@ class PlasticityLoss(RankingLoss):
 
     def __call__(self, emb1, emb2, emb3, label1, label2, label3):
         '''
-
         :param emb1: torch.Tensor, [m, dim]
         :param emb2: torch.Tensor, [n, dim]
         :param label1: torch.Tensor, [m]
