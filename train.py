@@ -132,6 +132,7 @@ if __name__ == '__main__':
             device_ids=[local_rank],
             output_device=local_rank,
             broadcast_buffers=False,
+            find_unused_parameters=True,   # ✅ FIX lỗi "Expected to have finished reduction..."
         )
 
     optimizer = build_optimizer(args, model)
@@ -154,4 +155,4 @@ if __name__ == '__main__':
     finally:
         # tránh warning "destroy_process_group() was not called"
         if args.distributed and torch.distributed.is_available() and torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
+            torch.distributed.destroy_process_group()fv
