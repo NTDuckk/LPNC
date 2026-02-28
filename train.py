@@ -155,4 +155,4 @@ if __name__ == '__main__':
     finally:
         # tránh warning "destroy_process_group() was not called"
         if args.distributed and torch.distributed.is_available() and torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()fv
+            torch.distributed.destroy_process_group()
