@@ -127,7 +127,7 @@ class RandomIdentitySampler_DDP(Sampler):
         self.num_pids_per_batch = self.mini_batch_size // self.num_instances
         self.index_dic = defaultdict(list)
 
-        for index, (pid, _, _, _) in enumerate(self.data_source):
+        for index, (_, pid, _, _) in enumerate(self.data_source):
             self.index_dic[pid].append(index)
         self.pids = list(self.index_dic.keys())
 
@@ -141,11 +141,15 @@ class RandomIdentitySampler_DDP(Sampler):
             self.length += num - num % self.num_instances
 
         self.rank = dist.get_rank()
+        self.epoch = 0  # for shuffling control
         #self.world_size = dist.get_world_size()
         self.length //= self.world_size
 
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
     def __iter__(self):
-        seed = shared_random_seed()
+        seed = int(shared_random_seed()) + int(getattr(self, 'epoch', 0))
         np.random.seed(seed)
         self._seed = int(seed)
         final_idxs = self.sample_list()
@@ -194,4 +198,3 @@ class RandomIdentitySampler_DDP(Sampler):
 
     def __len__(self):
         return self.length
-

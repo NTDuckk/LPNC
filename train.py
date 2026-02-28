@@ -40,6 +40,11 @@ if __name__ == '__main__':
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_rank = int(os.environ.get("LOCAL_RANK", str(getattr(args, "local_rank", 0))))
 
+    # expose for other modules
+    args.rank = rank
+    args.world_size = world_size
+    args.local_rank = local_rank
+
     # distributed chỉ bật khi WORLD_SIZE > 1
     args.distributed = world_size > 1
 
@@ -84,6 +89,10 @@ if __name__ == '__main__':
 
     # ====== output dir + logger ======
     cur_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    if args.distributed and torch.distributed.is_available() and torch.distributed.is_initialized():
+        obj = [cur_time] if rank == 0 else [None]
+        torch.distributed.broadcast_object_list(obj, src=0)
+        cur_time = obj[0]
     args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}_{args.loss_names}')
 
     logger = setup_logger(
