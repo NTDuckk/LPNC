@@ -1,4 +1,5 @@
 import argparse
+import os
 def get_args():
     parser = argparse.ArgumentParser(description="LPNC Args")
     parser.add_argument("--tau", default=0.015, type=float)
