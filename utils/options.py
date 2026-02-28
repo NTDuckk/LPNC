@@ -8,7 +8,7 @@ def get_args():
     parser.add_argument("--lambda2_weight", default=3.5, type=float)
 
     ######################## general settings ########################
-    parser.add_argument("--local_rank", default=0, type=int, help="local rank for distributed training")
+    parser.add_argument("--local_rank", "--local-rank",dest="local_rank",default=0, type=int,help="local rank for distributed training")
     parser.add_argument("--num_gpus", default=1, type=int, help="number of gpus for distributed training")
     parser.add_argument("--name", default="baseline", help="experiment name to save")
     parser.add_argument("--output_dir", default="run_logs")
@@ -77,5 +77,6 @@ def get_args():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--test", dest='training', default=True, action='store_false')
     args = parser.parse_args()
-
-    return args
+    if "LOCAL_RANK" in os.environ:
+        args.local_rank = int(os.environ["LOCAL_RANK"])
+    return args     

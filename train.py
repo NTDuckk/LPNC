@@ -28,18 +28,36 @@ def set_seed(seed=1):
 
 if __name__ == '__main__':
     args = get_args()
-    set_seed(1+get_rank())
+    # lấy rank/local_rank từ env của torchrun (nếu có)
+    rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if "LOCAL_RANK" in os.environ:
+        args.local_rank = int(os.environ["LOCAL_RANK"])
+
+    # distributed chỉ bật khi WORLD_SIZE > 1
+    args.distributed = world_size > 1
+
+    # set seed theo rank để mỗi process khác seed
+    set_seed(1 + rank)
     name = args.name
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
-    args.distributed = num_gpus > 1
-
-    if args.distributed:
-        torch.cuda.set_device(args.local_rank)
-        torch.distributed.init_process_group(backend="nccl", init_method="env://")
-        synchronize()
-    
-    device = "cuda"
+    # chọn device an toàn
+    if torch.cuda.is_available():
+        if args.distributed:
+            ndev = torch.cuda.device_count()
+            if args.local_rank >= ndev:
+                raise RuntimeError(
+                    f"local_rank={args.local_rank} nhưng máy chỉ có {ndev} GPU. "
+                    f"Bạn đang torchrun nhiều process hơn số GPU."
+                )
+            torch.cuda.set_device(args.local_rank)
+            torch.distributed.init_process_group(backend="nccl", init_method="env://")
+            synchronize()
+            device = torch.device("cuda", args.local_rank)
+        else:
+            device = torch.device("cuda", 0)
+    else:
+        device = torch.device("cpu")
     cur_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}_{args.loss_names}')
     logger = setup_logger('LPNC', save_dir=args.output_dir, if_train=args.training, distributed_rank=get_rank())
