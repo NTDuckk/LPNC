@@ -1,45 +1,55 @@
 import argparse
-import os
+
 def get_args():
     parser = argparse.ArgumentParser(description="LPNC Args")
+
     parser.add_argument("--tau", default=0.015, type=float)
     parser.add_argument("--select_ratio", default=0.4, type=float)
     parser.add_argument("--margin", default=0.1, type=float)
+
+    # keep lambda1 for SupCon weight
     parser.add_argument("--lambda1_weight", default=0.5, type=float)
-    parser.add_argument("--lambda2_weight", default=3.5, type=float)
+    # keep this arg for compatibility even if not used anymore
+    parser.add_argument("--lambda2_weight", default=1.0, type=float)
 
     ######################## general settings ########################
-    parser.add_argument("--local_rank", "--local-rank",dest="local_rank",default=0, type=int,help="local rank for distributed training")
-    parser.add_argument("--num_gpus", default=1, type=int, help="number of gpus for distributed training")
+    parser.add_argument("--local_rank", default=0, type=int)
     parser.add_argument("--name", default="baseline", help="experiment name to save")
     parser.add_argument("--output_dir", default="run_logs")
     parser.add_argument("--log_period", default=20)
     parser.add_argument("--eval_period", default=1)
-    parser.add_argument("--val_dataset", default="test") # use val set when evaluate, if test use test set
+    parser.add_argument("--val_dataset", default="test")
     parser.add_argument("--resume", default=False, action='store_true')
     parser.add_argument("--resume_ckpt_file", default="", help='resume from ...')
     parser.add_argument("--finetune", type=str, default="")
     parser.add_argument("--pretrain", type=str, default="")
 
-
     ######################## model general settings ########################
-    parser.add_argument("--pretrain_choice", default='ViT-B/16') # whether use pretrained model
-    parser.add_argument("--temperature", type=float, default=0.02, help="initial temperature value, if 0, don't use temperature")
+    parser.add_argument("--pretrain_choice", default='ViT-B/16')
+    parser.add_argument("--temperature", type=float, default=0.02,
+                        help="initial temperature value, if 0, don't use temperature")
     parser.add_argument("--img_aug", default=True, action='store_true')
     parser.add_argument("--txt_aug", default=True, action='store_true')
-    
-    ## cross modal transfomer setting
-    parser.add_argument("--cmt_depth", type=int, default=2, help="cross modal transformer self attn layers")
-    parser.add_argument("--masked_token_rate", type=float, default=0.8, help="masked token rate for mlm task")
-    parser.add_argument("--masked_token_unchanged_rate", type=float, default=0.1, help="masked token unchanged rate")
-    parser.add_argument("--lr_factor", type=float, default=5.0, help="lr factor for random init self implement module")
-    parser.add_argument("--MLM", default=False, action='store_true',help="whether to use Mask Language Modeling dataset")
 
+    ## cross modal transformer setting
+    parser.add_argument("--cmt_depth", type=int, default=2,
+                        help="cross modal transformer self attn layers")
+    parser.add_argument("--masked_token_rate", type=float, default=0.8,
+                        help="masked token rate for mlm task")
+    parser.add_argument("--masked_token_unchanged_rate", type=float, default=0.1,
+                        help="masked token unchanged rate")
+    parser.add_argument("--lr_factor", type=float, default=5.0,
+                        help="lr factor for random init self implement module")
+    parser.add_argument("--MLM", default=False, action='store_true',
+                        help="whether to use Mask Language Modeling dataset")
 
     ######################## loss settings ########################
-    parser.add_argument("--loss_names", default='supid+cotrl+cid', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm']")
+    # now only keep PromptSG-like branch
+    parser.add_argument("--loss_names", default='supid',
+                        help="use only supid branch")
+    parser.add_argument("--triplet_margin", type=float, default=0.3)
 
-    ######################## vison trainsformer settings ########################
+    ######################## vision transformer settings ########################
     parser.add_argument("--img_size", type=tuple, default=(384, 128))
     parser.add_argument("--stride_size", type=int, default=16)
 
@@ -56,7 +66,7 @@ def get_args():
     parser.add_argument("--weight_decay_bias", type=float, default=0.)
     parser.add_argument("--alpha", type=float, default=0.9)
     parser.add_argument("--beta", type=float, default=0.999)
-    
+
     ######################## scheduler ########################
     parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--milestones", type=int, nargs='+', default=(45, 50))
@@ -68,8 +78,11 @@ def get_args():
     parser.add_argument("--target_lr", type=float, default=0)
     parser.add_argument("--power", type=float, default=0.9)
 
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    
     ######################## dataset ########################
-    parser.add_argument("--dataset_name", default="CUHK-PEDES", help="[CUHK-PEDES, ICFG-PEDES, RSTPReid]")
+    parser.add_argument("--dataset_name", default="CUHK-PEDES",
+                        help="[CUHK-PEDES, ICFG-PEDES, RSTPReid]")
     parser.add_argument("--sampler", default="identity", help="choose sampler from [identity, random]")
     parser.add_argument("--num_instance", type=int, default=2)
     parser.add_argument("--root_dir", default="datasets/dataset")
@@ -77,7 +90,6 @@ def get_args():
     parser.add_argument("--test_batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--test", dest='training', default=True, action='store_false')
+
     args = parser.parse_args()
-    if "LOCAL_RANK" in os.environ:
-        args.local_rank = int(os.environ["LOCAL_RANK"])
-    return args     
+    return args
