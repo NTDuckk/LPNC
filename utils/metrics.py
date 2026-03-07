@@ -26,10 +26,8 @@ def rank(similarity, q_pids, g_pids, max_rank=10, get_mAP=True):
     num_rel = matches.sum(1)
     tmp_cmc = matches.cumsum(1)
 
-    inp = [
-        tmp_cmc[i][match_row.nonzero()[-1]] / (match_row.nonzero()[-1] + 1.0)
-        for i, match_row in enumerate(matches)
-    ]
+    inp = [tmp_cmc[i][match_row.nonzero()[-1]] / (match_row.nonzero()[-1] + 1.0)
+           for i, match_row in enumerate(matches)]
     mINP = torch.cat(inp).mean() * 100
 
     tmp_cmc = [tmp_cmc[:, i] / (i + 1.0) for i in range(tmp_cmc.shape[1])]
@@ -42,17 +40,9 @@ def rank(similarity, q_pids, g_pids, max_rank=10, get_mAP=True):
 
 def get_metrics(similarity, qids, gids, n_, retur_indices=False):
     t2i_cmc, t2i_mAP, t2i_mINP, indices = rank(
-        similarity=similarity,
-        q_pids=qids,
-        g_pids=gids,
-        max_rank=10,
-        get_mAP=True,
+        similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True
     )
-    t2i_cmc, t2i_mAP, t2i_mINP = (
-        t2i_cmc.numpy(),
-        t2i_mAP.numpy(),
-        t2i_mINP.numpy(),
-    )
+    t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
 
     row = [
         n_,
@@ -61,9 +51,8 @@ def get_metrics(similarity, qids, gids, n_, retur_indices=False):
         t2i_cmc[9],
         t2i_mAP,
         t2i_mINP,
-        t2i_cmc[0] + t2i_cmc[4] + t2i_cmc[9],
+        t2i_cmc[0] + t2i_cmc[4] + t2i_cmc[9]
     ]
-
     if retur_indices:
         return row, indices
     return row
@@ -81,9 +70,10 @@ class Evaluator:
         model = model.eval()
         device = next(model.parameters()).device
 
-        qids, gids, qfeats, gfeats = [], [], [], []
+        qids, gids = [], []
+        qfeats, gfeats_raw, gfeats_cff = [], [], []
 
-        # text/query
+        # query text
         for pid, caption in self.txt_loader:
             caption = caption.to(device)
             with torch.no_grad():
@@ -91,42 +81,45 @@ class Evaluator:
             qids.append(pid.view(-1))
             qfeats.append(text_feat)
 
-        qids = torch.cat(qids, 0)
-        qfeats = torch.cat(qfeats, 0)
-
-        # image/gallery
+        # gallery image
         for pid, img in self.img_loader:
             img = img.to(device)
             with torch.no_grad():
-                img_feat = model.encode_image(img).cpu()
+                raw_feat = model.encode_image(img).cpu()
+                cff_feat = model.encode_image_cff(img).cpu()
             gids.append(pid.view(-1))
-            gfeats.append(img_feat)
+            gfeats_raw.append(raw_feat)
+            gfeats_cff.append(cff_feat)
 
+        qids = torch.cat(qids, 0)
         gids = torch.cat(gids, 0)
-        gfeats = torch.cat(gfeats, 0)
+        qfeats = torch.cat(qfeats, 0)
+        gfeats_raw = torch.cat(gfeats_raw, 0)
+        gfeats_cff = torch.cat(gfeats_cff, 0)
 
-        return qfeats.cpu(), gfeats.cpu(), qids.cpu(), gids.cpu()
+        return qfeats, gfeats_raw, gfeats_cff, qids, gids
 
     def eval(self, model, i2t_metric=False):
-        qfeats, gfeats, qids, gids = self._compute_embedding(model)
+        qfeats, gfeats_raw, gfeats_cff, qids, gids = self._compute_embedding(model)
 
         qfeats = F.normalize(qfeats, p=2, dim=1)
-        gfeats = F.normalize(gfeats, p=2, dim=1)
-
-        # keep only BGE evaluation
-        sims_bge = qfeats @ gfeats.t()
+        gfeats_raw = F.normalize(gfeats_raw, p=2, dim=1)
+        gfeats_cff = F.normalize(gfeats_cff, p=2, dim=1)
 
         sims_dict = {
-            "BGE": sims_bge,
+            "BGE_raw": qfeats @ gfeats_raw.t(),
+            "CFF": qfeats @ gfeats_cff.t(),
         }
 
         table = PrettyTable(["task", "R1", "R5", "R10", "mAP", "mINP", "rSum"])
-        top1 = 0
+        cff_top1 = 0.0
 
-        for key in sims_dict.keys():
-            sims = sims_dict[key]
+        for key, sims in sims_dict.items():
             rs = get_metrics(sims, qids, gids, f"{key}-t2i", False)
             table.add_row(rs)
+
+            if key == "CFF":
+                cff_top1 = rs[1]
 
             if i2t_metric:
                 i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(
@@ -134,19 +127,17 @@ class Evaluator:
                     q_pids=gids,
                     g_pids=qids,
                     max_rank=10,
-                    get_mAP=True,
+                    get_mAP=True
                 )
                 i2t_cmc, i2t_mAP, i2t_mINP = (
-                    i2t_cmc.numpy(),
-                    i2t_mAP.numpy(),
-                    i2t_mINP.numpy(),
+                    i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
                 )
-                table.add_row(
-                    ["i2t", i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP,
-                     i2t_cmc[0] + i2t_cmc[4] + i2t_cmc[9]]
-                )
-
-            top1 = max(top1, rs[1])
+                table.add_row([
+                    f"{key}-i2t",
+                    i2t_cmc[0], i2t_cmc[4], i2t_cmc[9],
+                    i2t_mAP, i2t_mINP,
+                    i2t_cmc[0] + i2t_cmc[4] + i2t_cmc[9]
+                ])
 
         table.custom_format["R1"] = lambda f, v: f"{v:.2f}"
         table.custom_format["R5"] = lambda f, v: f"{v:.2f}"
@@ -156,6 +147,5 @@ class Evaluator:
         table.custom_format["rSum"] = lambda f, v: f"{v:.2f}"
 
         self.logger.info("\n" + str(table))
-        self.logger.info("\n" + "best R1 = " + str(top1))
-
-        return top1
+        self.logger.info("\n" + "best R1 (CFF) = " + str(cff_top1))
+        return cff_top1

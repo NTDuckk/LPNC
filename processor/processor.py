@@ -30,7 +30,6 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     }
 
     tb_writer = SummaryWriter(log_dir=args.output_dir)
-
     best_top1 = 0.0
 
     for epoch in range(start_epoch, num_epoch + 1):
@@ -40,7 +39,6 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
         model.train()
         model.epoch = epoch
-
         optimizer.zero_grad()
 
         for n_iter, batch in enumerate(train_loader):
@@ -57,9 +55,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 supid_val = supid_val.item()
             meters["supid_loss"].update(supid_val, batch_size)
 
-            # gradient accumulation
-            loss_for_backward = total_loss / accum_steps
-            loss_for_backward.backward()
+            (total_loss / accum_steps).backward()
 
             should_step = ((n_iter + 1) % accum_steps == 0) or ((n_iter + 1) == len(train_loader))
             if should_step:
@@ -117,4 +113,4 @@ def do_inference(model, test_img_loader, test_txt_loader, refer_loader, args):
     logger.info("Enter inferencing")
 
     evaluator = Evaluator(test_img_loader, test_txt_loader, refer_loader, args)
-    top1 = evaluator.eval(model.eval())
+    evaluator.eval(model.eval())
