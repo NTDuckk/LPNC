@@ -42,6 +42,46 @@ def print_model_info(model, args, logger):
     except Exception:
         pass
 
+
+def print_optimizer_info(optimizer, model, logger):
+    # map parameter id -> name
+    name_map = {id(p): n for n, p in model.named_parameters()}
+
+    logger.info("Optimizer parameter groups:")
+    for i, g in enumerate(optimizer.param_groups):
+        lr = g.get('lr', None)
+        wd = g.get('weight_decay', None)
+        params = g.get('params', [])
+        names = [name_map.get(id(p), '<unknown>') for p in params]
+        logger.info(f" - group {i}: lr={lr}, weight_decay={wd}, params_count={len(params)}")
+        # list up to first 20 parameter names for readability
+        for nm in names[:20]:
+            logger.info(f"    {nm}")
+        if len(names) > 20:
+            logger.info(f"    ... ({len(names)-20} more)")
+
+    # modules that are fully frozen vs trainable
+    frozen_modules = []
+    trainable_modules = []
+    for m_name, m in model.named_children():
+        params = list(m.parameters())
+        if len(params) == 0:
+            continue
+        if all(not p.requires_grad for p in params):
+            frozen_modules.append(m_name)
+        else:
+            trainable_modules.append(m_name)
+
+    logger.info(f"Frozen modules: {frozen_modules}")
+    logger.info(f"Trainable modules: {trainable_modules}")
+
+    frozen_params = [n for n, p in model.named_parameters() if not p.requires_grad]
+    logger.info(f"Frozen parameters count: {len(frozen_params)}")
+    for n in frozen_params[:50]:
+        logger.info(f"    {n}")
+    if len(frozen_params) > 50:
+        logger.info(f"    ... ({len(frozen_params)-50} more)")
+
 def set_seed(seed=1):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -111,6 +151,15 @@ if __name__ == '__main__':
         )
     optimizer = build_optimizer(args, model)
     scheduler = build_lr_scheduler(args, optimizer)
+
+    # Print optimizer / frozen module information (helpful to verify which params are optimized)
+    try:
+        print_optimizer_info(optimizer, model, logger)
+    except Exception:
+        try:
+            print("Unable to print optimizer info (logger unavailable)")
+        except Exception:
+            pass
 
 
     is_master = get_rank() == 0
