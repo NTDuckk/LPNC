@@ -17,6 +17,31 @@ from utils.comm import get_rank, synchronize
 import warnings
 warnings.filterwarnings("ignore")
 
+def print_model_info(model, args, logger):
+    try:
+        logger.info(f"Pretrained choice: {args.pretrain_choice}")
+    except Exception:
+        logger.info(f"Pretrained choice: (not set)")
+    try:
+        logger.info(f"Image size: {args.img_size}")
+    except Exception:
+        logger.info(f"Image size: (not set)")
+    try:
+        logger.info(f"Losses / Tasks: {args.loss_names}")
+    except Exception:
+        logger.info(f"Losses / Tasks: (not set)")
+
+    # Print top-level child modules (concise)
+    logger.info("Model top-level modules:")
+    for name, module in model.named_children():
+        logger.info(f" - {name}: {module.__class__.__name__}")
+    # Print a small parameter summary
+    try:
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.info(f"Trainable parameters: {total_params}")
+    except Exception:
+        pass
+
 def set_seed(seed=1):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -55,6 +80,16 @@ if __name__ == '__main__':
         
     train_loader, val_img_loader, val_txt_loader, refer_txt_loader,num_classes = build_dataloader(args)
     model = build_model(args, num_classes)
+
+    # Print architecture / config summary before moving to device and training
+    if 'logger' in globals():
+        print_model_info(model, args, logger)
+    else:
+        try:
+            # fallback to simple print
+            print(f"Pretrained: {args.pretrain_choice}, img_size: {args.img_size}, losses: {args.loss_names}")
+        except Exception:
+            pass
 
     logger.info('Total params: %2.fM' % (sum(p.numel() for p in model.parameters() if p.requires_grad) / 1000000.0))
     model.to(device)
