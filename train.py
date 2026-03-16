@@ -82,6 +82,31 @@ def print_optimizer_info(optimizer, model, logger):
     if len(frozen_params) > 50:
         logger.info(f"    ... ({len(frozen_params)-50} more)")
 
+
+def print_frozen_modules(model, logger):
+    """Print only modules and parameters that are frozen (requires_grad==False)."""
+    frozen_modules = []
+    for m_name, m in model.named_children():
+        params = list(m.parameters())
+        if len(params) == 0:
+            continue
+        if all(not p.requires_grad for p in params):
+            frozen_modules.append(m_name)
+
+    logger.info("Frozen modules:")
+    if frozen_modules:
+        for m in frozen_modules:
+            logger.info(f" - {m}")
+    else:
+        logger.info(" - (none)")
+
+    frozen_params = [n for n, p in model.named_parameters() if not p.requires_grad]
+    logger.info(f"Frozen parameters count: {len(frozen_params)}")
+    for n in frozen_params[:200]:
+        logger.info(f"    {n}")
+    if len(frozen_params) > 200:
+        logger.info(f"    ... ({len(frozen_params)-200} more)")
+
 def set_seed(seed=1):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -121,13 +146,13 @@ if __name__ == '__main__':
     train_loader, val_img_loader, val_txt_loader, refer_txt_loader,num_classes = build_dataloader(args)
     model = build_model(args, num_classes)
 
-    # Print architecture / config summary before moving to device and training
+    # Only print frozen modules/params before moving to device and training
     if 'logger' in globals():
-        print_model_info(model, args, logger)
+        print_frozen_modules(model, logger)
     else:
         try:
-            # fallback to simple print
-            print(f"Pretrained: {args.pretrain_choice}, img_size: {args.img_size}, losses: {args.loss_names}")
+            frozen_params = [n for n, p in model.named_parameters() if not p.requires_grad]
+            print(f"Frozen parameters count: {len(frozen_params)}")
         except Exception:
             pass
 
@@ -152,14 +177,7 @@ if __name__ == '__main__':
     optimizer = build_optimizer(args, model)
     scheduler = build_lr_scheduler(args, optimizer)
 
-    # Print optimizer / frozen module information (helpful to verify which params are optimized)
-    try:
-        print_optimizer_info(optimizer, model, logger)
-    except Exception:
-        try:
-            print("Unable to print optimizer info (logger unavailable)")
-        except Exception:
-            pass
+    # (Only frozen modules were printed earlier; skip verbose optimizer info)
 
 
     is_master = get_rank() == 0
